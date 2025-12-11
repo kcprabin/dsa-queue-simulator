@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="../traffic generator/traffic generator.vcxproj" Id="cdcac645-4273-41bd-88cb-7cc504e9e560" />
+  <Project Path="Data structures.vcxproj" Id="ced249e4-9e43-41fb-9150-befdfa7ae16b" />
+</Solution>
