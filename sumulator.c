@@ -22,7 +22,7 @@
 #define MAIN_FONT "C:\\Windows\\Fonts\\Arial.ttf"
 #define VEHICLE_WIDTH 35
 #define VEHICLE_HEIGHT 20
-                                                                                                                            
+
 // --- FILE COMMUNICATION CONFIGURATION (Paths must match traffic.c) ---
 const char* LANE_FILES[4] = {
     "C:\\TrafficShared\\lanea.txt",
@@ -162,14 +162,14 @@ void enqueue(Queue* q, const char* vehicleNum, char road, int lane) {
     newNode->vehicleNumber[NAME_MAX - 1] = '\0';
     newNode->road = road;
     newNode->lane = lane;
-    
+
     // Assign color based on vehicle number hash
     int hash = 0;
     for (int i = 0; vehicleNum[i] != '\0'; i++) {
         hash += vehicleNum[i];
     }
     newNode->colorIndex = hash % 8;
-    
+
     newNode->next = NULL;
 
     if (q->rear == NULL) {
@@ -329,48 +329,49 @@ void drawQueueCounts(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state
 void drawVehicleVisual(SDL_Renderer* renderer, int x, int y, SDL_Color color, bool isHorizontal) {
     // Car body
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-    
+
     if (isHorizontal) {
         SDL_Rect body = { x, y, VEHICLE_WIDTH, VEHICLE_HEIGHT };
         SDL_RenderFillRect(renderer, &body);
-        
+
         // Car outline
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderDrawRect(renderer, &body);
-        
+
         // Windows (lighter color)
-        SDL_SetRenderDrawColor(renderer, 
-            (Uint8)(color.r * 0.7), 
-            (Uint8)(color.g * 0.7), 
+        SDL_SetRenderDrawColor(renderer,
+            (Uint8)(color.r * 0.7),
+            (Uint8)(color.g * 0.7),
             (Uint8)(color.b * 0.7), 255);
         SDL_Rect window1 = { x + 5, y + 3, 10, 6 };
         SDL_Rect window2 = { x + 20, y + 3, 10, 6 };
         SDL_RenderFillRect(renderer, &window1);
         SDL_RenderFillRect(renderer, &window2);
-        
+
         // Wheels
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_Rect wheel1 = { x + 5, y + 16, 6, 3 };
         SDL_Rect wheel2 = { x + 24, y + 16, 6, 3 };
         SDL_RenderFillRect(renderer, &wheel1);
         SDL_RenderFillRect(renderer, &wheel2);
-    } else {
+    }
+    else {
         // Vertical orientation
         SDL_Rect body = { x, y, VEHICLE_HEIGHT, VEHICLE_WIDTH };
         SDL_RenderFillRect(renderer, &body);
-        
+
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderDrawRect(renderer, &body);
-        
-        SDL_SetRenderDrawColor(renderer, 
-            (Uint8)(color.r * 0.7), 
-            (Uint8)(color.g * 0.7), 
+
+        SDL_SetRenderDrawColor(renderer,
+            (Uint8)(color.r * 0.7),
+            (Uint8)(color.g * 0.7),
             (Uint8)(color.b * 0.7), 255);
         SDL_Rect window1 = { x + 3, y + 5, 6, 10 };
         SDL_Rect window2 = { x + 3, y + 20, 6, 10 };
         SDL_RenderFillRect(renderer, &window1);
         SDL_RenderFillRect(renderer, &window2);
-        
+
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_Rect wheel1 = { x + 16, y + 5, 3, 6 };
         SDL_Rect wheel2 = { x + 16, y + 24, 3, 6 };
@@ -390,10 +391,10 @@ void drawVehiclesInQueue(SDL_Renderer* renderer, TTF_Font* font, TrafficState* s
 
         while (current != NULL && displayCount < 5) {
             SDL_Color vehicleColor = VEHICLE_COLORS[current->colorIndex];
-            
+
             int x = 0, y = 0;
             bool isHorizontal = false;
-            
+
             switch (roadIdx) {
             case 0: // Road A (vertical - coming from top)
                 x = 365;
@@ -419,11 +420,11 @@ void drawVehiclesInQueue(SDL_Renderer* renderer, TTF_Font* font, TrafficState* s
 
             // Draw visual car
             drawVehicleVisual(renderer, x, y, vehicleColor, isHorizontal);
-            
+
             // Draw vehicle ID below/beside the car
             char displayStr[10];
             snprintf(displayStr, sizeof(displayStr), "%.5s", current->vehicleNumber);
-            
+
             int textX = isHorizontal ? x + 5 : x - 10;
             int textY = isHorizontal ? y + 22 : y + 38;
             displayText(renderer, font, displayStr, textX, textY);
@@ -524,8 +525,8 @@ DWORD WINAPI trafficController(LPVOID arg) {
             while (state->roadQueues[0].count > PRIORITY_MIN) {
                 VehicleNode* vehicle = dequeue(&state->roadQueues[0]);
                 if (vehicle) {
-                    printf("[PRIORITY] Served: %s from Road A (Remaining: %d)\n", 
-                           vehicle->vehicleNumber, state->roadQueues[0].count);
+                    printf("[PRIORITY] Served: %s from Road A (Remaining: %d)\n",
+                        vehicle->vehicleNumber, state->roadQueues[0].count);
                     free(vehicle);
                 }
                 LeaveCriticalSection(&state->cs);
@@ -558,8 +559,8 @@ DWORD WINAPI trafficController(LPVOID arg) {
             for (int k = 0; k < vehicles_to_dequeue; k++) {
                 VehicleNode* vehicle = dequeue(current_q);
                 if (vehicle) {
-                    printf("[Road %c GREEN] %s served [Queue: %d]\n", 
-                           ROAD_MAP[current_road_idx], vehicle->vehicleNumber, current_q->count);
+                    printf("[Road %c GREEN] %s served [Queue: %d]\n",
+                        ROAD_MAP[current_road_idx], vehicle->vehicleNumber, current_q->count);
                     free(vehicle);
                 }
                 else {
@@ -620,13 +621,14 @@ DWORD WINAPI readAndParseFile(LPVOID arg) {
 
             if (newVehicles > 0) {
                 clearFile(filepath);
-                printf("[FILE READ] Road %c: Added %d new vehicles\n", 
-                       ROAD_MAP[roadIdx], newVehicles);
+                printf("[FILE READ] Road %c: Added %d new vehicles\n",
+                    ROAD_MAP[roadIdx], newVehicles);
             }
         }
 
         Sleep(1000);
     }
+    // made changes
 
     return 0;
 }
