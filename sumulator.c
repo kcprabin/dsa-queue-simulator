@@ -10,22 +10,24 @@
 
 #define MAX_LINE_LENGTH 50
 #define NAME_MAX 16
-#define WINDOW_WIDTH 1000
-#define WINDOW_HEIGHT 900
-#define SCALE 1
-#define ROAD_WIDTH 180
-#define LANE_WIDTH 60
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 1000
+#define ROAD_WIDTH 200
+#define LANE_WIDTH 66
 #define MAX_QUEUE_SIZE 100
 #define PRIORITY_THRESHOLD 10
 #define PRIORITY_MIN 5
 #define MAIN_FONT "C:\\Windows\\Fonts\\Arial.ttf"
-#define VEHICLE_WIDTH 35
-#define VEHICLE_HEIGHT 20
+#define TARGET_FPS 60
+#define FRAME_DELAY (1000 / TARGET_FPS)
 
 #define FREE_FLOW_MAX_VEHICLES 8
 #define LEFT_TURN_WAIT_TIME 2000
 #define STRAIGHT_GREEN_TIME 4000
 #define VEHICLE_PROCESS_TIME 500
+#define VEHICLE_DOT_SIZE 8
+#define VEHICLE_SPACING 45.0f
+#define VEHICLE_SPEED 1.8f
 
 const char* LANE_FILES[4] = {
     "C:\\TrafficShared\\lanea.txt",
@@ -33,24 +35,18 @@ const char* LANE_FILES[4] = {
     "C:\\TrafficShared\\lanec.txt",
     "C:\\TrafficShared\\laned.txt"
 };
-const char ROAD_MAP[4] = { 'A', 'B', 'C', 'D' };
 
-const SDL_Color VEHICLE_COLORS[8] = {
-    {231, 76, 60, 255},
-    {52, 152, 219, 255},
-    {46, 204, 113, 255},
-    {241, 196, 15, 255},
-    {155, 89, 182, 255},
-    {230, 126, 34, 255},
-    {26, 188, 156, 255},
-    {243, 156, 18, 255}
-};
+const char ROAD_MAP[4] = { 'A', 'B', 'C', 'D' };
 
 typedef struct VehicleNode {
     char vehicleNumber[NAME_MAX];
     char road;
     int lane;
-    int colorIndex;
+    float currentX;
+    float currentY;
+    float targetX;
+    float targetY;
+    bool isAnimating;
     ULONGLONG arrivalTime;
     struct VehicleNode* next;
 } VehicleNode;
@@ -77,14 +73,17 @@ void initQueues(TrafficState* state);
 void enqueue(Queue* q, const char* vehicleNum, char road, int lane);
 VehicleNode* dequeue(Queue* q);
 void clearQueue(Queue* q);
+void updateVehiclePositions(TrafficState* state);
+void calculateVehiclePosition(int roadIdx, int laneIdx, int queuePosition, float* x, float* y);
 static void clearFile(const char* filepath);
-void drawRoadsAndLane(SDL_Renderer* renderer, TTF_Font* font);
-void displayText(SDL_Renderer* renderer, TTF_Font* font, char* text, int x, int y);
+void drawBackground(SDL_Renderer* renderer);
+void drawRoads(SDL_Renderer* renderer);
+void displayText(SDL_Renderer* renderer, TTF_Font* font, char* text, int x, int y, SDL_Color color);
 void drawTrafficLights(SDL_Renderer* renderer, TrafficState* state);
-void drawQueueCounts(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state);
-void drawVehiclesInQueue(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state);
-void drawVehicleVisual(SDL_Renderer* renderer, int x, int y, SDL_Color color, bool isHorizontal);
+void drawQueueInfo(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state);
+void drawVehicles(SDL_Renderer* renderer, TrafficState* state);
 void drawStatistics(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state);
+void drawVehicleDot(SDL_Renderer* renderer, int x, int y);
 void refreshDisplay(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state);
 DWORD WINAPI trafficController(LPVOID arg);
 DWORD WINAPI leftTurnController(LPVOID arg);
@@ -109,22 +108,15 @@ int main() {
     state.avgWaitTime = 0.0f;
     InitializeCriticalSection(&state.cs);
 
-    TTF_Font* font = TTF_OpenFont(MAIN_FONT, 13);
+    TTF_Font* font = TTF_OpenFont(MAIN_FONT, 14);
     if (!font) {
         SDL_Log("Failed to load font: %s", TTF_GetError());
-        font = NULL;
     }
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderClear(renderer);
-    drawRoadsAndLane(renderer, font);
-    SDL_RenderPresent(renderer);
-
-    printf("=== Optimized 3-Lane Traffic Simulator ===\n");
-    printf("Lane 1: Left Turn (Controlled)\n");
-    printf("Lane 2: Straight (V-Served + Priority)\n");
-    printf("Lane 3: Right Turn (Free Flow - Max 8)\n");
-    printf("=========================================\n\n");
+    printf("=== Enhanced 3-Lane Traffic Simulator @ 60 FPS ===\n");
+    printf("Lane 1: Left Turn | Lane 2: Straight | Lane 3: Free Flow\n");
+    printf("Vehicles: White dots with smooth animation\n");
+    printf("=================================================\n\n");
 
     HANDLE hController = CreateThread(NULL, 0, trafficController, &state, 0, NULL);
     HANDLE hLeftTurn = CreateThread(NULL, 0, leftTurnController, &state, 0, NULL);
@@ -132,22 +124,30 @@ int main() {
     HANDLE hReader = CreateThread(NULL, 0, readAndParseFile, &state, 0, NULL);
 
     bool running = true;
+    Uint32 lastTime = SDL_GetTicks();
+
     while (running) {
+        Uint32 frameStart = SDL_GetTicks();
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
         }
 
+        updateVehiclePositions(&state);
         refreshDisplay(renderer, font, &state);
-        SDL_Delay(100);
+
+        Uint32 frameTime = SDL_GetTicks() - frameStart;
+        if (frameTime < FRAME_DELAY) {
+            SDL_Delay(FRAME_DELAY - frameTime);
+        }
     }
 
-    if (hController != NULL) CloseHandle(hController);
-    if (hLeftTurn != NULL) CloseHandle(hLeftTurn);
-    if (hFreeFlow != NULL) CloseHandle(hFreeFlow);
-    if (hReader != NULL) CloseHandle(hReader);
+    if (hController) CloseHandle(hController);
+    if (hLeftTurn) CloseHandle(hLeftTurn);
+    if (hFreeFlow) CloseHandle(hFreeFlow);
+    if (hReader) CloseHandle(hReader);
 
     DeleteCriticalSection(&state.cs);
-
     if (font) TTF_CloseFont(font);
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
@@ -166,23 +166,48 @@ void initQueues(TrafficState* state) {
     }
 }
 
+void calculateVehiclePosition(int roadIdx, int laneIdx, int queuePosition, float* x, float* y) {
+    float offset = queuePosition * VEHICLE_SPACING;
+    int centerX = WINDOW_WIDTH / 2;
+    int centerY = WINDOW_HEIGHT / 2;
+    int laneOffset = (laneIdx - 1) * LANE_WIDTH;
+
+    switch (roadIdx) {
+    case 0:
+        *x = centerX + laneOffset;
+        *y = centerY - ROAD_WIDTH / 2 - 50 - offset;
+        break;
+    case 1:
+        *x = centerX + laneOffset;
+        *y = centerY + ROAD_WIDTH / 2 + 50 + offset;
+        break;
+    case 2:
+        *x = centerX + ROAD_WIDTH / 2 + 50 + offset;
+        *y = centerY + laneOffset;
+        break;
+    case 3:
+        *x = centerX - ROAD_WIDTH / 2 - 50 - offset;
+        *y = centerY + laneOffset;
+        break;
+    }
+}
+
 void enqueue(Queue* q, const char* vehicleNum, char road, int lane) {
     if (q->count >= MAX_QUEUE_SIZE) return;
 
     VehicleNode* newNode = (VehicleNode*)malloc(sizeof(VehicleNode));
-    if (newNode == NULL) return;
+    if (!newNode) return;
 
     strncpy(newNode->vehicleNumber, vehicleNum, NAME_MAX - 1);
     newNode->vehicleNumber[NAME_MAX - 1] = '\0';
     newNode->road = road;
     newNode->lane = lane;
     newNode->arrivalTime = GetTickCount64();
-
-    int hash = 0;
-    for (int i = 0; vehicleNum[i] != '\0'; i++) {
-        hash += vehicleNum[i];
-    }
-    newNode->colorIndex = hash % 8;
+    newNode->currentX = 0.0f;
+    newNode->currentY = 0.0f;
+    newNode->targetX = 0.0f;
+    newNode->targetY = 0.0f;
+    newNode->isAnimating = false;
     newNode->next = NULL;
 
     if (q->rear == NULL) {
@@ -196,22 +221,69 @@ void enqueue(Queue* q, const char* vehicleNum, char road, int lane) {
 }
 
 VehicleNode* dequeue(Queue* q) {
-    if (q->front == NULL) return NULL;
+    if (!q->front) return NULL;
 
     VehicleNode* temp = q->front;
     q->front = q->front->next;
-
-    if (q->front == NULL) q->rear = NULL;
-
+    if (!q->front) q->rear = NULL;
     q->count--;
     return temp;
 }
 
 void clearQueue(Queue* q) {
-    while (q->front != NULL) {
+    while (q->front) {
         VehicleNode* temp = dequeue(q);
         free(temp);
     }
+}
+
+void updateVehiclePositions(TrafficState* state) {
+    EnterCriticalSection(&state->cs);
+
+    for (int roadIdx = 0; roadIdx < 4; roadIdx++) {
+        for (int laneIdx = 0; laneIdx < 3; laneIdx++) {
+            VehicleNode* current = state->laneQueues[roadIdx][laneIdx].front;
+            int position = 0;
+
+            while (current) {
+                float targetX, targetY;
+                calculateVehiclePosition(roadIdx, laneIdx, position, &targetX, &targetY);
+
+                if (!current->isAnimating) {
+                    current->currentX = targetX;
+                    current->currentY = targetY;
+                    current->isAnimating = true;
+                }
+
+                current->targetX = targetX;
+                current->targetY = targetY;
+
+                float dx = current->targetX - current->currentX;
+                float dy = current->targetY - current->currentY;
+                float distance = sqrtf(dx * dx + dy * dy);
+
+                if (distance > 0.5f) {
+                    float speed = VEHICLE_SPEED;
+                    if (distance < 10.0f) speed *= (distance / 10.0f);
+
+                    float dirX = dx / distance;
+                    float dirY = dy / distance;
+
+                    current->currentX += dirX * speed;
+                    current->currentY += dirY * speed;
+                }
+                else {
+                    current->currentX = current->targetX;
+                    current->currentY = current->targetY;
+                }
+
+                current = current->next;
+                position++;
+            }
+        }
+    }
+
+    LeaveCriticalSection(&state->cs);
 }
 
 static void clearFile(const char* filepath) {
@@ -243,256 +315,114 @@ int calculateOptimalVServed(TrafficState* state, int roadIdx) {
 
 bool initializeSDL(SDL_Window** window, SDL_Renderer** renderer) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
+        SDL_Log("SDL Init Error: %s", SDL_GetError());
         return false;
     }
+
     if (TTF_Init() < 0) {
-        SDL_Log("SDL_ttf could not initialize! TTF_Error: %s\n", TTF_GetError());
+        SDL_Log("TTF Init Error: %s", TTF_GetError());
         return false;
     }
 
-    *window = SDL_CreateWindow("Optimized 3-Lane Traffic Simulator",
+    *window = SDL_CreateWindow("Enhanced Traffic Simulator @ 60 FPS",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WINDOW_WIDTH * SCALE, WINDOW_HEIGHT * SCALE,
-        SDL_WINDOW_SHOWN);
+        WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
+
     if (!*window) {
-        SDL_Log("Failed to create window: %s", SDL_GetError());
-        SDL_Quit();
+        SDL_Log("Window Error: %s", SDL_GetError());
         return false;
     }
 
-    *renderer = SDL_CreateRenderer(*window, -1, SDL_RENDERER_ACCELERATED);
-    SDL_RenderSetScale(*renderer, SCALE, SCALE);
-
+    *renderer = SDL_CreateRenderer(*window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!*renderer) {
-        SDL_Log("Failed to create renderer: %s", SDL_GetError());
-        SDL_DestroyWindow(*window);
-        TTF_Quit();
-        SDL_Quit();
+        SDL_Log("Renderer Error: %s", SDL_GetError());
         return false;
     }
 
     return true;
 }
 
-void swap(int* a, int* b) {
-    int temp = *a;
-    *a = *b;
-    *b = temp;
-}
+void drawBackground(SDL_Renderer* renderer) {
+    SDL_SetRenderDrawColor(renderer, 34, 139, 34, 255);
+    SDL_RenderClear(renderer);
 
-void drawArrow(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, int x3, int y3) {
-    if (y1 > y2) { swap(&y1, &y2); swap(&x1, &x2); }
-    if (y1 > y3) { swap(&y1, &y3); swap(&x1, &x3); }
-    if (y2 > y3) { swap(&y2, &y3); swap(&x2, &x3); }
-
-    float dx1 = (y2 - y1) ? (float)(x2 - x1) / (y2 - y1) : 0;
-    float dx2 = (y3 - y1) ? (float)(x3 - x1) / (y3 - y1) : 0;
-    float dx3 = (y3 - y2) ? (float)(x3 - x2) / (y3 - y2) : 0;
-
-    float sx1 = (float)x1, sx2 = (float)x1;
-
-    for (int y = y1; y < y2; y++) {
-        SDL_RenderDrawLine(renderer, (int)sx1, y, (int)sx2, y);
-        sx1 += dx1;
-        sx2 += dx2;
-    }
-
-    sx1 = (float)x2;
-    for (int y = y2; y <= y3; y++) {
-        SDL_RenderDrawLine(renderer, (int)sx1, y, (int)sx2, y);
-        sx1 += dx3;
-        sx2 += dx2;
+    for (int i = 0; i < WINDOW_HEIGHT; i += 20) {
+        for (int j = 0; j < WINDOW_WIDTH; j += 20) {
+            if ((i + j) % 40 == 0) {
+                SDL_SetRenderDrawColor(renderer, 28, 120, 28, 255);
+                SDL_Rect grass = { j, i, 10, 10 };
+                SDL_RenderFillRect(renderer, &grass);
+            }
+        }
     }
 }
 
-void drawTrafficLight(SDL_Renderer* renderer, int x, int y, bool isGreen) {
-    SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
-    SDL_Rect outerBox = { x - 2, y - 2, 54, 34 };
-    SDL_RenderFillRect(renderer, &outerBox);
+void drawRoads(SDL_Renderer* renderer) {
+    int centerX = WINDOW_WIDTH / 2;
+    int centerY = WINDOW_HEIGHT / 2;
+
+    SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+    SDL_Rect verticalRoad = { centerX - ROAD_WIDTH / 2, 0, ROAD_WIDTH, WINDOW_HEIGHT };
+    SDL_RenderFillRect(renderer, &verticalRoad);
+
+    SDL_Rect horizontalRoad = { 0, centerY - ROAD_WIDTH / 2, WINDOW_WIDTH, ROAD_WIDTH };
+    SDL_RenderFillRect(renderer, &horizontalRoad);
 
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
-    SDL_Rect lightBox = { x, y, 50, 30 };
-    SDL_RenderFillRect(renderer, &lightBox);
+    SDL_Rect junction = { centerX - ROAD_WIDTH / 2, centerY - ROAD_WIDTH / 2, ROAD_WIDTH, ROAD_WIDTH };
+    SDL_RenderFillRect(renderer, &junction);
 
-    if (isGreen) SDL_SetRenderDrawColor(renderer, 46, 204, 113, 255);
-    else SDL_SetRenderDrawColor(renderer, 231, 76, 60, 255);
-
-    SDL_Rect light = { x + 5, y + 5, 20, 20 };
-    SDL_RenderFillRect(renderer, &light);
-
-    drawArrow(renderer, x + 35, y + 5, x + 35, y + 25, x + 45, y + 15);
-}
-
-void drawTrafficLights(SDL_Renderer* renderer, TrafficState* state) {
-    EnterCriticalSection(&state->cs);
-    int greenRoad = state->currentGreenRoad;
-    LeaveCriticalSection(&state->cs);
-
-    drawTrafficLight(renderer, 455, 330, greenRoad == 0);
-    drawTrafficLight(renderer, 455, 550, greenRoad == 1);
-    drawTrafficLight(renderer, 560, 440, greenRoad == 2);
-    drawTrafficLight(renderer, 350, 440, greenRoad == 3);
-}
-
-void drawQueueCounts(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state) {
-    if (!font) return;
-
-    char buffer[100];
-
-    EnterCriticalSection(&state->cs);
-
-    SDL_SetRenderDrawColor(renderer, 236, 240, 241, 255);
-    SDL_Rect boxA = { 380, 90, 240, 50 };
-    SDL_RenderFillRect(renderer, &boxA);
-    SDL_SetRenderDrawColor(renderer, 52, 152, 219, 255);
-    SDL_RenderDrawRect(renderer, &boxA);
-
-    sprintf(buffer, "A: L1:%d L2:%d L3:%d",
-        state->laneQueues[0][0].count,
-        state->laneQueues[0][1].count,
-        state->laneQueues[0][2].count);
-    displayText(renderer, font, buffer, 390, 105);
-
-    SDL_SetRenderDrawColor(renderer, 236, 240, 241, 255);
-    SDL_Rect boxB = { 380, 810, 240, 50 };
-    SDL_RenderFillRect(renderer, &boxB);
-    SDL_SetRenderDrawColor(renderer, 52, 152, 219, 255);
-    SDL_RenderDrawRect(renderer, &boxB);
-
-    sprintf(buffer, "B: L1:%d L2:%d L3:%d",
-        state->laneQueues[1][0].count,
-        state->laneQueues[1][1].count,
-        state->laneQueues[1][2].count);
-    displayText(renderer, font, buffer, 390, 825);
-
-    SDL_SetRenderDrawColor(renderer, 236, 240, 241, 255);
-    SDL_Rect boxC = { 745, 420, 240, 50 };
-    SDL_RenderFillRect(renderer, &boxC);
-    SDL_SetRenderDrawColor(renderer, 52, 152, 219, 255);
-    SDL_RenderDrawRect(renderer, &boxC);
-
-    sprintf(buffer, "C: L1:%d L2:%d L3:%d",
-        state->laneQueues[2][0].count,
-        state->laneQueues[2][1].count,
-        state->laneQueues[2][2].count);
-    displayText(renderer, font, buffer, 755, 435);
-
-    SDL_SetRenderDrawColor(renderer, 236, 240, 241, 255);
-    SDL_Rect boxD = { 15, 420, 240, 50 };
-    SDL_RenderFillRect(renderer, &boxD);
-    SDL_SetRenderDrawColor(renderer, 52, 152, 219, 255);
-    SDL_RenderDrawRect(renderer, &boxD);
-
-    sprintf(buffer, "D: L1:%d L2:%d L3:%d",
-        state->laneQueues[3][0].count,
-        state->laneQueues[3][1].count,
-        state->laneQueues[3][2].count);
-    displayText(renderer, font, buffer, 25, 435);
-
-    if (state->isPriorityMode) {
-        SDL_SetRenderDrawColor(renderer, 243, 156, 18, 255);
-        SDL_Rect priorityBox = { 360, 400, 280, 50 };
-        SDL_RenderFillRect(renderer, &priorityBox);
-        SDL_SetRenderDrawColor(renderer, 230, 126, 34, 255);
-        SDL_RenderDrawRect(renderer, &priorityBox);
-
-        displayText(renderer, font, "! PRIORITY MODE ACTIVE !", 390, 418);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 100, 255);
+    for (int i = 0; i < WINDOW_HEIGHT; i += 40) {
+        if (i < centerY - ROAD_WIDTH / 2 || i > centerY + ROAD_WIDTH / 2) {
+            SDL_Rect dash = { centerX - 3, i, 6, 20 };
+            SDL_RenderFillRect(renderer, &dash);
+        }
     }
 
-    LeaveCriticalSection(&state->cs);
-}
-
-void drawStatistics(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state) {
-    if (!font) return;
-
-    char buffer[100];
-
-    EnterCriticalSection(&state->cs);
-
-    SDL_SetRenderDrawColor(renderer, 44, 62, 80, 255);
-    SDL_Rect statsBox = { 10, 10, 280, 70 };
-    SDL_RenderFillRect(renderer, &statsBox);
-    SDL_SetRenderDrawColor(renderer, 52, 152, 219, 255);
-    SDL_RenderDrawRect(renderer, &statsBox);
-
-    SDL_Color white = { 255, 255, 255, 255 };
-
-    sprintf(buffer, "Processed: %d vehicles", state->totalVehiclesProcessed);
-    SDL_Surface* textSurface = TTF_RenderText_Solid(font, buffer, white);
-    if (textSurface) {
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-        SDL_Rect textRect = { 20, 20, textSurface->w, textSurface->h };
-        SDL_RenderCopy(renderer, texture, NULL, &textRect);
-        SDL_DestroyTexture(texture);
-        SDL_FreeSurface(textSurface);
+    for (int i = 0; i < WINDOW_WIDTH; i += 40) {
+        if (i < centerX - ROAD_WIDTH / 2 || i > centerX + ROAD_WIDTH / 2) {
+            SDL_Rect dash = { i, centerY - 3, 20, 6 };
+            SDL_RenderFillRect(renderer, &dash);
+        }
     }
 
-    sprintf(buffer, "Avg Wait: %.1fs", state->avgWaitTime);
-    textSurface = TTF_RenderText_Solid(font, buffer, white);
-    if (textSurface) {
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-        SDL_Rect textRect = { 20, 45, textSurface->w, textSurface->h };
-        SDL_RenderCopy(renderer, texture, NULL, &textRect);
-        SDL_DestroyTexture(texture);
-        SDL_FreeSurface(textSurface);
-    }
+    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+    for (int i = 1; i < 3; i++) {
+        int yOffset = centerY - ROAD_WIDTH / 2 + i * LANE_WIDTH;
+        SDL_RenderDrawLine(renderer, 0, yOffset, centerX - ROAD_WIDTH / 2, yOffset);
+        SDL_RenderDrawLine(renderer, centerX + ROAD_WIDTH / 2, yOffset, WINDOW_WIDTH, yOffset);
 
-    LeaveCriticalSection(&state->cs);
-}
-
-void drawVehicleVisual(SDL_Renderer* renderer, int x, int y, SDL_Color color, bool isHorizontal) {
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-
-    if (isHorizontal) {
-        SDL_Rect body = { x, y, VEHICLE_WIDTH, VEHICLE_HEIGHT };
-        SDL_RenderFillRect(renderer, &body);
-
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderDrawRect(renderer, &body);
-
-        SDL_SetRenderDrawColor(renderer,
-            (Uint8)(color.r * 0.6),
-            (Uint8)(color.g * 0.6),
-            (Uint8)(color.b * 0.6), 255);
-        SDL_Rect window1 = { x + 5, y + 3, 10, 6 };
-        SDL_Rect window2 = { x + 20, y + 3, 10, 6 };
-        SDL_RenderFillRect(renderer, &window1);
-        SDL_RenderFillRect(renderer, &window2);
-
-        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-        SDL_Rect wheel1 = { x + 5, y + 16, 6, 3 };
-        SDL_Rect wheel2 = { x + 24, y + 16, 6, 3 };
-        SDL_RenderFillRect(renderer, &wheel1);
-        SDL_RenderFillRect(renderer, &wheel2);
-    }
-    else {
-        SDL_Rect body = { x, y, VEHICLE_HEIGHT, VEHICLE_WIDTH };
-        SDL_RenderFillRect(renderer, &body);
-
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderDrawRect(renderer, &body);
-
-        SDL_SetRenderDrawColor(renderer,
-            (Uint8)(color.r * 0.6),
-            (Uint8)(color.g * 0.6),
-            (Uint8)(color.b * 0.6), 255);
-        SDL_Rect window1 = { x + 3, y + 5, 6, 10 };
-        SDL_Rect window2 = { x + 3, y + 20, 6, 10 };
-        SDL_RenderFillRect(renderer, &window1);
-        SDL_RenderFillRect(renderer, &window2);
-
-        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-        SDL_Rect wheel1 = { x + 16, y + 5, 3, 6 };
-        SDL_Rect wheel2 = { x + 16, y + 24, 3, 6 };
-        SDL_RenderFillRect(renderer, &wheel1);
-        SDL_RenderFillRect(renderer, &wheel2);
+        int xOffset = centerX - ROAD_WIDTH / 2 + i * LANE_WIDTH;
+        SDL_RenderDrawLine(renderer, xOffset, 0, xOffset, centerY - ROAD_WIDTH / 2);
+        SDL_RenderDrawLine(renderer, xOffset, centerY + ROAD_WIDTH / 2, xOffset, WINDOW_HEIGHT);
     }
 }
 
-void drawVehiclesInQueue(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state) {
-    if (!font) return;
+void drawVehicleDot(SDL_Renderer* renderer, int x, int y) {
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 
+    for (int dy = -VEHICLE_DOT_SIZE / 2; dy <= VEHICLE_DOT_SIZE / 2; dy++) {
+        for (int dx = -VEHICLE_DOT_SIZE / 2; dx <= VEHICLE_DOT_SIZE / 2; dx++) {
+            if (dx * dx + dy * dy <= (VEHICLE_DOT_SIZE / 2) * (VEHICLE_DOT_SIZE / 2)) {
+                SDL_RenderDrawPoint(renderer, x + dx, y + dy);
+            }
+        }
+    }
+
+    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+    for (int dy = -VEHICLE_DOT_SIZE / 2; dy <= VEHICLE_DOT_SIZE / 2; dy++) {
+        for (int dx = -VEHICLE_DOT_SIZE / 2; dx <= VEHICLE_DOT_SIZE / 2; dx++) {
+            int dist = dx * dx + dy * dy;
+            if (dist <= (VEHICLE_DOT_SIZE / 2) * (VEHICLE_DOT_SIZE / 2) &&
+                dist > ((VEHICLE_DOT_SIZE / 2) - 1) * ((VEHICLE_DOT_SIZE / 2) - 1)) {
+                SDL_RenderDrawPoint(renderer, x + dx, y + dy);
+            }
+        }
+    }
+}
+
+void drawVehicles(SDL_Renderer* renderer, TrafficState* state) {
     EnterCriticalSection(&state->cs);
 
     for (int roadIdx = 0; roadIdx < 4; roadIdx++) {
@@ -500,52 +430,10 @@ void drawVehiclesInQueue(SDL_Renderer* renderer, TTF_Font* font, TrafficState* s
             VehicleNode* current = state->laneQueues[roadIdx][laneIdx].front;
             int displayCount = 0;
 
-            while (current != NULL && displayCount < 6) {
-                SDL_Color vehicleColor = VEHICLE_COLORS[current->colorIndex];
-
-                int x = 0, y = 0;
-                bool isHorizontal = false;
-                int laneOffset = (laneIdx - 1) * 22;
-
-                switch (roadIdx) {
-                case 0:
-                    x = 478 + laneOffset;
-                    y = 150 + displayCount * 48;
-                    isHorizontal = false;
-                    break;
-                case 1:
-                    x = 478 + laneOffset;
-                    y = 720 - displayCount * 48;
-                    isHorizontal = false;
-                    break;
-                case 2:
-                    x = 720 - displayCount * 48;
-                    y = 458 + laneOffset;
-                    isHorizontal = true;
-                    break;
-                case 3:
-                    x = 160 + displayCount * 48;
-                    y = 458 + laneOffset;
-                    isHorizontal = true;
-                    break;
-                }
-
-                drawVehicleVisual(renderer, x, y, vehicleColor, isHorizontal);
-
-                char displayStr[10];
-                snprintf(displayStr, sizeof(displayStr), "%.5s", current->vehicleNumber);
-
-                SDL_Color textColor = { 44, 62, 80, 255 };
-                SDL_Surface* textSurface = TTF_RenderText_Solid(font, displayStr, textColor);
-                if (textSurface) {
-                    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                    int textX = isHorizontal ? x + 5 : x - 15;
-                    int textY = isHorizontal ? y + 22 : y + 37;
-                    SDL_Rect textRect = { textX, textY, textSurface->w, textSurface->h };
-                    SDL_RenderCopy(renderer, texture, NULL, &textRect);
-                    SDL_DestroyTexture(texture);
-                    SDL_FreeSurface(textSurface);
-                }
+            while (current && displayCount < 10) {
+                int x = (int)current->currentX;
+                int y = (int)current->currentY;
+                drawVehicleDot(renderer, x, y);
 
                 current = current->next;
                 displayCount++;
@@ -556,113 +444,138 @@ void drawVehiclesInQueue(SDL_Renderer* renderer, TTF_Font* font, TrafficState* s
     LeaveCriticalSection(&state->cs);
 }
 
-void drawRoadsAndLane(SDL_Renderer* renderer, TTF_Font* font) {
-    SDL_SetRenderDrawColor(renderer, 70, 70, 70, 255);
-    SDL_Rect verticalRoad = { WINDOW_WIDTH / 2 - ROAD_WIDTH / 2, 80, ROAD_WIDTH, WINDOW_HEIGHT - 80 };
-    SDL_RenderFillRect(renderer, &verticalRoad);
+void drawTrafficLight(SDL_Renderer* renderer, int x, int y, bool isGreen) {
+    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+    SDL_Rect pole = { x + 18, y + 40, 4, 50 };
+    SDL_RenderFillRect(renderer, &pole);
 
-    SDL_Rect horizontalRoad = { 0, WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2, WINDOW_WIDTH, ROAD_WIDTH };
-    SDL_RenderFillRect(renderer, &horizontalRoad);
+    SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+    SDL_Rect box = { x, y, 40, 40 };
+    SDL_RenderFillRect(renderer, &box);
 
-    SDL_SetRenderDrawColor(renderer, 90, 90, 90, 255);
-    SDL_Rect junction = { WINDOW_WIDTH / 2 - ROAD_WIDTH / 2, WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2, ROAD_WIDTH, ROAD_WIDTH };
-    SDL_RenderFillRect(renderer, &junction);
+    SDL_SetRenderDrawColor(renderer, isGreen ? 46 : 100, isGreen ? 204 : 20, isGreen ? 113 : 20, 255);
+    SDL_Rect light = { x + 10, y + 10, 20, 20 };
+    SDL_RenderFillRect(renderer, &light);
 
-    SDL_SetRenderDrawColor(renderer, 240, 230, 140, 255);
-    for (int i = 80; i < WINDOW_HEIGHT; i += 30) {
-        if (i < WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2 || i > WINDOW_HEIGHT / 2 + ROAD_WIDTH / 2) {
-            SDL_Rect dash = { WINDOW_WIDTH / 2 - 2, i, 4, 15 };
-            SDL_RenderFillRect(renderer, &dash);
-        }
-    }
-
-    for (int i = 0; i < WINDOW_WIDTH; i += 30) {
-        if (i < WINDOW_WIDTH / 2 - ROAD_WIDTH / 2 || i > WINDOW_WIDTH / 2 + ROAD_WIDTH / 2) {
-            SDL_Rect dash = { i, WINDOW_HEIGHT / 2 - 2, 15, 4 };
-            SDL_RenderFillRect(renderer, &dash);
-        }
-    }
-
-    SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
-    for (int i = 0; i <= 3; i++) {
-        int yPos = WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2 + LANE_WIDTH * i;
-        SDL_RenderDrawLine(renderer, 0, yPos, WINDOW_WIDTH / 2 - ROAD_WIDTH / 2, yPos);
-        SDL_RenderDrawLine(renderer, WINDOW_WIDTH, yPos, WINDOW_WIDTH / 2 + ROAD_WIDTH / 2, yPos);
-
-        int xPos = WINDOW_WIDTH / 2 - ROAD_WIDTH / 2 + LANE_WIDTH * i;
-        SDL_RenderDrawLine(renderer, xPos, 80, xPos, WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2);
-        SDL_RenderDrawLine(renderer, xPos, WINDOW_HEIGHT, xPos, WINDOW_HEIGHT / 2 + ROAD_WIDTH / 2);
-    }
-
-    if (font) {
-        SDL_Color roadLabelColor = { 255, 255, 255, 255 };
-        SDL_Surface* textSurface;
-        SDL_Texture* texture;
-
-        textSurface = TTF_RenderText_Solid(font, "Road A", roadLabelColor);
-        if (textSurface) {
-            texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            SDL_Rect textRect = { 478, 85, textSurface->w, textSurface->h };
-            SDL_RenderCopy(renderer, texture, NULL, &textRect);
-            SDL_DestroyTexture(texture);
-            SDL_FreeSurface(textSurface);
-        }
-
-        textSurface = TTF_RenderText_Solid(font, "Road B", roadLabelColor);
-        if (textSurface) {
-            texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            SDL_Rect textRect = { 478, 865, textSurface->w, textSurface->h };
-            SDL_RenderCopy(renderer, texture, NULL, &textRect);
-            SDL_DestroyTexture(texture);
-            SDL_FreeSurface(textSurface);
-        }
-
-        textSurface = TTF_RenderText_Solid(font, "Road D", roadLabelColor);
-        if (textSurface) {
-            texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            SDL_Rect textRect = { 25, 458, textSurface->w, textSurface->h };
-            SDL_RenderCopy(renderer, texture, NULL, &textRect);
-            SDL_DestroyTexture(texture);
-            SDL_FreeSurface(textSurface);
-        }
-
-        textSurface = TTF_RenderText_Solid(font, "Road C", roadLabelColor);
-        if (textSurface) {
-            texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            SDL_Rect textRect = { 930, 458, textSurface->w, textSurface->h };
-            SDL_RenderCopy(renderer, texture, NULL, &textRect);
-            SDL_DestroyTexture(texture);
-            SDL_FreeSurface(textSurface);
+    if (isGreen) {
+        SDL_SetRenderDrawColor(renderer, 100, 255, 150, 200);
+        for (int i = 0; i < 3; i++) {
+            SDL_Rect glow = { x + 10 - i, y + 10 - i, 20 + i * 2, 20 + i * 2 };
+            SDL_RenderDrawRect(renderer, &glow);
         }
     }
 }
 
-void displayText(SDL_Renderer* renderer, TTF_Font* font, char* text, int x, int y) {
+void drawTrafficLights(SDL_Renderer* renderer, TrafficState* state) {
+    EnterCriticalSection(&state->cs);
+    int greenRoad = state->currentGreenRoad;
+    LeaveCriticalSection(&state->cs);
+
+    int centerX = WINDOW_WIDTH / 2;
+    int centerY = WINDOW_HEIGHT / 2;
+
+    drawTrafficLight(renderer, centerX - 20, centerY - ROAD_WIDTH / 2 - 120, greenRoad == 0);
+    drawTrafficLight(renderer, centerX - 20, centerY + ROAD_WIDTH / 2 + 80, greenRoad == 1);
+    drawTrafficLight(renderer, centerX + ROAD_WIDTH / 2 + 80, centerY - 20, greenRoad == 2);
+    drawTrafficLight(renderer, centerX - ROAD_WIDTH / 2 - 120, centerY - 20, greenRoad == 3);
+}
+
+void drawQueueInfo(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state) {
     if (!font) return;
 
-    SDL_Color textColor = { 44, 62, 80, 255 };
-    SDL_Surface* textSurface = TTF_RenderText_Solid(font, text, textColor);
-    if (!textSurface) return;
+    char buffer[100];
+    SDL_Color white = { 255, 255, 255, 255 };
+    SDL_Color black = { 0, 0, 0, 255 };
 
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-    SDL_FreeSurface(textSurface);
+    EnterCriticalSection(&state->cs);
 
-    if (!texture) return;
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
+    SDL_Rect boxA = { 20, 20, 250, 60 };
+    SDL_RenderFillRect(renderer, &boxA);
+    sprintf(buffer, "Road A: L1:%d L2:%d L3:%d",
+        state->laneQueues[0][0].count,
+        state->laneQueues[0][1].count,
+        state->laneQueues[0][2].count);
+    displayText(renderer, font, buffer, 30, 35, white);
 
-    SDL_Rect textRect = { x, y, 0, 0 };
-    SDL_QueryTexture(texture, NULL, NULL, &textRect.w, &textRect.h);
-    SDL_RenderCopy(renderer, texture, NULL, &textRect);
+    SDL_Rect boxB = { 20, WINDOW_HEIGHT - 80, 250, 60 };
+    SDL_RenderFillRect(renderer, &boxB);
+    sprintf(buffer, "Road B: L1:%d L2:%d L3:%d",
+        state->laneQueues[1][0].count,
+        state->laneQueues[1][1].count,
+        state->laneQueues[1][2].count);
+    displayText(renderer, font, buffer, 30, WINDOW_HEIGHT - 65, white);
+
+    SDL_Rect boxC = { WINDOW_WIDTH - 270, WINDOW_HEIGHT / 2 - 30, 250, 60 };
+    SDL_RenderFillRect(renderer, &boxC);
+    sprintf(buffer, "Road C: L1:%d L2:%d L3:%d",
+        state->laneQueues[2][0].count,
+        state->laneQueues[2][1].count,
+        state->laneQueues[2][2].count);
+    displayText(renderer, font, buffer, WINDOW_WIDTH - 260, WINDOW_HEIGHT / 2 - 15, white);
+
+    SDL_Rect boxD = { 20, WINDOW_HEIGHT / 2 - 30, 250, 60 };
+    SDL_RenderFillRect(renderer, &boxD);
+    sprintf(buffer, "Road D: L1:%d L2:%d L3:%d",
+        state->laneQueues[3][0].count,
+        state->laneQueues[3][1].count,
+        state->laneQueues[3][2].count);
+    displayText(renderer, font, buffer, 30, WINDOW_HEIGHT / 2 - 15, white);
+
+    if (state->isPriorityMode) {
+        SDL_SetRenderDrawColor(renderer, 243, 156, 18, 220);
+        SDL_Rect priorityBox = { WINDOW_WIDTH / 2 - 150, WINDOW_HEIGHT / 2 - 25, 300, 50 };
+        SDL_RenderFillRect(renderer, &priorityBox);
+        displayText(renderer, font, "PRIORITY MODE ACTIVE", WINDOW_WIDTH / 2 - 120, WINDOW_HEIGHT / 2 - 10, black);
+    }
+
+    LeaveCriticalSection(&state->cs);
+}
+
+void drawStatistics(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state) {
+    if (!font) return;
+
+    char buffer[100];
+    SDL_Color white = { 255, 255, 255, 255 };
+
+    EnterCriticalSection(&state->cs);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
+    SDL_Rect statsBox = { WINDOW_WIDTH - 280, 20, 260, 80 };
+    SDL_RenderFillRect(renderer, &statsBox);
+
+    sprintf(buffer, "Processed: %d vehicles", state->totalVehiclesProcessed);
+    displayText(renderer, font, buffer, WINDOW_WIDTH - 270, 30, white);
+
+    sprintf(buffer, "Avg Wait: %.1fs", state->avgWaitTime);
+    displayText(renderer, font, buffer, WINDOW_WIDTH - 270, 55, white);
+
+    sprintf(buffer, "FPS: 60 | Mode: Smooth");
+    displayText(renderer, font, buffer, WINDOW_WIDTH - 270, 75, white);
+
+    LeaveCriticalSection(&state->cs);
+}
+
+void displayText(SDL_Renderer* renderer, TTF_Font* font, char* text, int x, int y, SDL_Color color) {
+    if (!font) return;
+
+    SDL_Surface* surface = TTF_RenderText_Blended(font, text, color);
+    if (!surface) return;
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Rect rect = { x, y, surface->w, surface->h };
+    SDL_RenderCopy(renderer, texture, NULL, &rect);
+
     SDL_DestroyTexture(texture);
+    SDL_FreeSurface(surface);
 }
 
 void refreshDisplay(SDL_Renderer* renderer, TTF_Font* font, TrafficState* state) {
-    SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
-    SDL_RenderClear(renderer);
-
-    drawRoadsAndLane(renderer, font);
+    drawBackground(renderer);
+    drawRoads(renderer);
     drawTrafficLights(renderer, state);
-    drawQueueCounts(renderer, font, state);
-    drawVehiclesInQueue(renderer, font, state);
+    drawVehicles(renderer, state);
+    drawQueueInfo(renderer, font, state);
     drawStatistics(renderer, font, state);
 
     SDL_RenderPresent(renderer);
@@ -681,7 +594,7 @@ DWORD WINAPI trafficController(LPVOID arg) {
             state->isPriorityMode = true;
             state->currentGreenRoad = 0;
 
-            printf("\n>>> PRIORITY MODE (Road A Lane 2: %d vehicles) <<<\n", A_lane2_count);
+            printf("\n>>> PRIORITY MODE (Road A: %d) <<<\n", A_lane2_count);
 
             while (state->laneQueues[0][1].count > PRIORITY_MIN) {
                 VehicleNode* vehicle = dequeue(&state->laneQueues[0][1]);
@@ -691,8 +604,7 @@ DWORD WINAPI trafficController(LPVOID arg) {
                     state->totalVehiclesProcessed++;
                     state->avgWaitTime = (float)state->totalWaitTime / state->totalVehiclesProcessed;
 
-                    printf("[PRIORITY] %s served (waited %.1fs)\n",
-                        vehicle->vehicleNumber, waitTime / 1000.0f);
+                    printf("[PRIORITY] %s served (%.1fs)\n", vehicle->vehicleNumber, waitTime / 1000.0f);
                     free(vehicle);
                 }
                 LeaveCriticalSection(&state->cs);
@@ -701,7 +613,7 @@ DWORD WINAPI trafficController(LPVOID arg) {
             }
 
             state->isPriorityMode = false;
-            printf(">>> Priority mode ended <<<\n\n");
+            printf(">>> Priority ended <<<\n\n");
             last_served_road = 0;
         }
         else {
@@ -709,7 +621,6 @@ DWORD WINAPI trafficController(LPVOID arg) {
             state->currentGreenRoad = last_served_road;
 
             int V_served = calculateOptimalVServed(state, last_served_road);
-
             int lane2Count = state->laneQueues[last_served_road][1].count;
             int toServe = (lane2Count < V_served) ? lane2Count : V_served;
 
@@ -721,8 +632,7 @@ DWORD WINAPI trafficController(LPVOID arg) {
                     state->totalVehiclesProcessed++;
                     state->avgWaitTime = (float)state->totalWaitTime / state->totalVehiclesProcessed;
 
-                    printf("[Road %c L2] %s served (waited %.1fs)\n",
-                        ROAD_MAP[last_served_road], vehicle->vehicleNumber, waitTime / 1000.0f);
+                    printf("[Road %c L2] %s (%.1fs)\n", ROAD_MAP[last_served_road], vehicle->vehicleNumber, waitTime / 1000.0f);
                     free(vehicle);
                 }
                 LeaveCriticalSection(&state->cs);
@@ -761,8 +671,7 @@ DWORD WINAPI leftTurnController(LPVOID arg) {
                     state->totalVehiclesProcessed++;
                     state->avgWaitTime = (float)state->totalWaitTime / state->totalVehiclesProcessed;
 
-                    printf("[Road %c L1 LEFT] %s served (waited %.1fs)\n",
-                        ROAD_MAP[roadIdx], vehicle->vehicleNumber, waitTime / 1000.0f);
+                    printf("[Road %c L1] %s (%.1fs)\n", ROAD_MAP[roadIdx], vehicle->vehicleNumber, waitTime / 1000.0f);
                     free(vehicle);
                 }
             }
@@ -791,8 +700,7 @@ DWORD WINAPI freeFlowController(LPVOID arg) {
                     state->totalVehiclesProcessed++;
                     state->avgWaitTime = (float)state->totalWaitTime / state->totalVehiclesProcessed;
 
-                    printf("[Road %c L3 FREE] %s passed (waited %.1fs)\n",
-                        ROAD_MAP[roadIdx], vehicle->vehicleNumber, waitTime / 1000.0f);
+                    printf("[Road %c L3 FREE] %s (%.1fs)\n", ROAD_MAP[roadIdx], vehicle->vehicleNumber, waitTime / 1000.0f);
                     free(vehicle);
                 }
             }
@@ -815,9 +723,7 @@ DWORD WINAPI readAndParseFile(LPVOID arg) {
 
     while (1) {
         for (int roadIdx = 0; roadIdx < 4; roadIdx++) {
-            const char* filepath = LANE_FILES[roadIdx];
-            FILE* file = fopen(filepath, "r");
-
+            FILE* file = fopen(LANE_FILES[roadIdx], "r");
             if (!file) continue;
 
             int newVehicles = 0;
@@ -827,12 +733,9 @@ DWORD WINAPI readAndParseFile(LPVOID arg) {
 
                 if (sscanf(line, "%d %s %d", &id, name, &lane) == 3) {
                     if (lane >= 1 && lane <= 3) {
-                        char roadChar = ROAD_MAP[roadIdx];
-
                         EnterCriticalSection(&state->cs);
-                        enqueue(&state->laneQueues[roadIdx][lane - 1], name, roadChar, lane);
+                        enqueue(&state->laneQueues[roadIdx][lane - 1], name, ROAD_MAP[roadIdx], lane);
                         LeaveCriticalSection(&state->cs);
-
                         newVehicles++;
                     }
                 }
@@ -841,8 +744,8 @@ DWORD WINAPI readAndParseFile(LPVOID arg) {
             fclose(file);
 
             if (newVehicles > 0) {
-                clearFile(filepath);
-                printf("[FILE READ] Road %c: +%d vehicles\n", ROAD_MAP[roadIdx], newVehicles);
+                clearFile(LANE_FILES[roadIdx]);
+                printf("[READ] Road %c: +%d\n", ROAD_MAP[roadIdx], newVehicles);
             }
         }
 
