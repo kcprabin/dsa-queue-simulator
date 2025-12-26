@@ -49,23 +49,25 @@ typedef struct {
     int waitingTime;
 } TransitionVehicle;
 
+// Circular queue for lane management
 typedef struct {
     Vehicle data[MAX_QUEUE];
     int front, rear, count;
 } Lane;
 
 typedef struct {
-    Lane L1;
-    Lane L2;
-    Lane L3;
+    Lane L1;  // Left turn
+    Lane L2;  // Straight
+    Lane L3;  // Right turn
 } RoadData;
 
-RoadData roads[4];
+RoadData roads[4];  // 0=North, 1=South, 2=East, 3=West
 TransitionVehicle transitions[MAX_QUEUE];
 int transitionCount = 0;
 int currentGreen = 0;
 int lightState = GREEN_LIGHT;
 
+// Returns opposite road: N↔S, E↔W
 static int getOppositeRoad(int road) {
     switch (road) {
     case 0: return 2;
@@ -110,6 +112,7 @@ float distance(float x1, float y1, float x2, float y2) {
     return sqrtf(dx * dx + dy * dy);
 }
 
+// Maps logical lane (1=left, 2=straight, 3=right) to physical lane index
 static int lane_index_for(int road, int logicalLane) {
     if (road == 0) {
         if (logicalLane == 3) return 0;
@@ -133,6 +136,7 @@ static int lane_index_for(int road, int logicalLane) {
     }
 }
 
+// Calculate spawn position outside the screen
 static void spawn_coords_for_fixed(int road, int laneIndex, float* outx, float* outy) {
     float cx = SCREEN_W / 2.0f;
     float cy = SCREEN_H / 2.0f;
@@ -145,6 +149,7 @@ static void spawn_coords_for_fixed(int road, int laneIndex, float* outx, float* 
     else { *outx = -30.0f; *outy = starty + LANE_W * (laneIndex + 0.5f); }
 }
 
+// Calculate target position at intersection edge
 static void intersection_lane_center(int road, int logicalLane, float* outx, float* outy) {
     float cx = SCREEN_W / 2.0f;
     float cy = SCREEN_H / 2.0f;
@@ -158,6 +163,7 @@ static void intersection_lane_center(int road, int logicalLane, float* outx, flo
     else { *outx = cx - ROAD_W / 2.0f - 8.0f; *outy = starty + LANE_W * (idx + 0.5f); }
 }
 
+// Check if spawning at position would be too close to existing vehicles
 static int checkTooCloseInLane(Lane* l, float x, float y, int skipIndex) {
     for (int i = 0; i < l->count; i++) {
         if (i == skipIndex) continue;
@@ -169,6 +175,7 @@ static int checkTooCloseInLane(Lane* l, float x, float y, int skipIndex) {
     return 0;
 }
 
+// Calculate distance to next vehicle in same lane
 static float getDistanceToVehicleAhead(Lane* L, int road, int vehicleIndex) {
     Vehicle* current = getLaneVehicle(L, vehicleIndex);
     if (!current) return 999999.0f;
@@ -179,6 +186,7 @@ static float getDistanceToVehicleAhead(Lane* L, int road, int vehicleIndex) {
         Vehicle* ahead = getLaneVehicle(L, i);
         if (!ahead) continue;
 
+        // Calculate distance along road direction
         float distAlongRoad = 0.0f;
         switch (road) {
         case 0: distAlongRoad = ahead->y - current->y; break;
@@ -195,6 +203,7 @@ static float getDistanceToVehicleAhead(Lane* L, int road, int vehicleIndex) {
     return minDist;
 }
 
+// Get movement direction for Lane 3 (right turn - free flow)
 static void l3_move_vector(int road, float* dx, float* dy) {
     if (road == 0) { *dx = 0.0f; *dy = -VEHICLE_SPEED; }
     else if (road == 1) { *dx = VEHICLE_SPEED; *dy = 0.0f; }
@@ -202,6 +211,7 @@ static void l3_move_vector(int road, float* dx, float* dy) {
     else { *dx = -VEHICLE_SPEED; *dy = 0.0f; }
 }
 
+// Move Lane 3 vehicles (right turn - no traffic light)
 static void moveLaneL3(Lane* L, int road) {
     float dx, dy;
     l3_move_vector(road, &dx, &dy);
@@ -217,12 +227,14 @@ static void moveLaneL3(Lane* L, int road) {
         float newx = v->x + dx;
         float newy = v->y + dy;
 
+        // Remove if out of bounds
         if (newx < -100 || newx > SCREEN_W + 100 || newy < -100 || newy > SCREEN_H + 100) {
             Vehicle temp;
             dequeue(L, &temp);
             continue;
         }
 
+        // Check collision with vehicles ahead
         int canMove = 1;
         for (int j = 0; j < L->count; j++) {
             if (i == j) continue;
@@ -256,6 +268,7 @@ static void moveLaneL3(Lane* L, int road) {
     }
 }
 
+// Move vehicles toward intersection center (Lane 1 & 2)
 void moveLaneTowardCenter(Lane* L, int road) {
     float mvx = 0.0f, mvy = 0.0f;
     if (road == 0) { mvy = VEHICLE_SPEED; }
@@ -271,11 +284,13 @@ void moveLaneTowardCenter(Lane* L, int road) {
         float cy = SCREEN_H / 2.0f;
         float distToIntersection;
 
+        // Calculate distance to intersection
         if (road == 0) distToIntersection = cy - ROAD_W / 2.0f - v->y;
         else if (road == 1) distToIntersection = v->x - (cx + ROAD_W / 2.0f);
         else if (road == 2) distToIntersection = v->y - (cy + ROAD_W / 2.0f);
         else distToIntersection = cx - ROAD_W / 2.0f - v->x;
 
+        // Stop at red light
         if (lightState == RED_LIGHT || currentGreen != road) {
             if (distToIntersection < STOPPING_DISTANCE && distToIntersection > 0) {
                 v->isStopped = 1;
@@ -285,6 +300,7 @@ void moveLaneTowardCenter(Lane* L, int road) {
 
         float distToAhead = getDistanceToVehicleAhead(L, road, i);
 
+        // Stop behind stopped vehicle
         if (distToAhead < STOPPING_DISTANCE) {
             if (i + 1 < L->count) {
                 Vehicle* ahead = getLaneVehicle(L, i + 1);
@@ -312,6 +328,7 @@ void moveLaneTowardCenter(Lane* L, int road) {
             v->isStopped = 1;
         }
 
+        // Remove if out of bounds
         if (v->x < -100 || v->x > SCREEN_W + 100 || v->y < -100 || v->y > SCREEN_H + 100) {
             for (int j = i; j < L->count - 1; j++) {
                 L->data[(L->front + j) % MAX_QUEUE] = L->data[(L->front + j + 1) % MAX_QUEUE];
@@ -321,6 +338,7 @@ void moveLaneTowardCenter(Lane* L, int road) {
     }
 }
 
+// Add vehicle to intersection transition zone
 static void addTransition(Vehicle v, int targetRoad) {
     if (transitionCount >= MAX_QUEUE) return;
     v.isStopped = 0;
@@ -330,7 +348,9 @@ static void addTransition(Vehicle v, int targetRoad) {
     transitionCount++;
 }
 
+// Move vehicles through intersection using priority queue
 static void moveTransitions() {
+    // Sort by waiting time (priority queue)
     for (int i = 0; i < transitionCount - 1; i++) {
         for (int j = i + 1; j < transitionCount; j++) {
             if (transitions[j].waitingTime > transitions[i].waitingTime) {
@@ -354,10 +374,10 @@ static void moveTransitions() {
 
         float speed = VEHICLE_SPEED;
 
+        // Reached target lane
         if (dist < speed) {
             tv->v.x = tx;
             tv->v.y = ty;
-
             tv->v.fromRoad = tv->targetRoad;
 
             if (!checkTooCloseInLane(&roads[tv->targetRoad].L3, tx, ty, -1)) {
@@ -371,6 +391,7 @@ static void moveTransitions() {
             }
             else {
                 tv->v.isStopped = 1;
+                // Force merge after timeout
                 if (tv->waitingTime > 50) {
                     enqueue(&roads[tv->targetRoad].L3, tv->v);
 
@@ -383,6 +404,7 @@ static void moveTransitions() {
             }
         }
         else {
+            // Check collision in transition zone
             int canMove = 1;
 
             for (int j = 0; j < transitionCount; j++) {
@@ -415,6 +437,7 @@ static void moveTransitions() {
     }
 }
 
+// Remove stuck vehicles from transition zone
 static void cleanupStuckTransitions() {
     static Uint32 lastCleanup = 0;
     Uint32 now = SDL_GetTicks();
@@ -433,6 +456,7 @@ static void cleanupStuckTransitions() {
     }
 }
 
+// Draw gradient green background
 void drawGradientBackground(SDL_Renderer* renderer) {
     for (int y = 0; y < SCREEN_H; y++) {
         int r = 40 + (y * 30) / SCREEN_H;
@@ -443,6 +467,7 @@ void drawGradientBackground(SDL_Renderer* renderer) {
     }
 }
 
+// Draw decorative trees around roads
 void drawLeaves(SDL_Renderer* renderer) {
     int cx = SCREEN_W / 2;
     int cy = SCREEN_H / 2;
@@ -462,10 +487,12 @@ void drawLeaves(SDL_Renderer* renderer) {
         int x = leafPositions[i][0];
         int y = leafPositions[i][1];
 
+        // Tree trunk
         SDL_SetRenderDrawColor(renderer, 101, 67, 33, 255);
         SDL_Rect trunk = { x - 4, y + 10, 8, 20 };
         SDL_RenderFillRect(renderer, &trunk);
 
+        // Main foliage
         SDL_SetRenderDrawColor(renderer, 34, 139, 34, 255);
         for (int dy = -15; dy <= 10; dy++) {
             for (int dx = -15; dx <= 15; dx++) {
@@ -475,6 +502,7 @@ void drawLeaves(SDL_Renderer* renderer) {
             }
         }
 
+        // Highlight
         SDL_SetRenderDrawColor(renderer, 50, 205, 50, 255);
         for (int dy = -10; dy <= 0; dy++) {
             for (int dx = -8; dx <= 8; dx++) {
@@ -484,6 +512,7 @@ void drawLeaves(SDL_Renderer* renderer) {
             }
         }
 
+        // Shadow
         SDL_SetRenderDrawColor(renderer, 20, 100, 20, 100);
         for (int dy = 5; dy <= 12; dy++) {
             for (int dx = -10; dx <= 10; dx++) {
@@ -502,6 +531,7 @@ void drawRoads(SDL_Renderer* renderer) {
     SDL_RenderFillRect(renderer, &vert);
     SDL_RenderFillRect(renderer, &horiz);
 
+    // Yellow lane markers
     SDL_SetRenderDrawColor(renderer, 255, 255, 100, 255);
     for (int i = 1; i < 3; i++) {
         int x = (int)(SCREEN_W / 2.0f - ROAD_W / 2.0f + i * LANE_W);
@@ -514,6 +544,7 @@ void drawRoads(SDL_Renderer* renderer) {
         }
     }
 
+    // Road edges
     SDL_SetRenderDrawColor(renderer, 35, 35, 38, 255);
     int cx = SCREEN_W / 2;
     int cy = SCREEN_H / 2;
@@ -528,6 +559,7 @@ void drawRoads(SDL_Renderer* renderer) {
     SDL_RenderFillRect(renderer, &edgeW);
 }
 
+// Draw car with direction-aware shape
 void drawVehicle(SDL_Renderer* renderer, Vehicle* v, int r, int g, int b) {
     if (!v) return;
 
@@ -541,6 +573,7 @@ void drawVehicle(SDL_Renderer* renderer, Vehicle* v, int r, int g, int b) {
         height = temp;
     }
 
+    // Darker color if stopped
     if (v->isStopped) {
         SDL_SetRenderDrawColor(renderer, r / 2, g / 2, b / 2, 255);
     }
@@ -559,6 +592,7 @@ void drawVehicle(SDL_Renderer* renderer, Vehicle* v, int r, int g, int b) {
     SDL_SetRenderDrawColor(renderer, r / 3, g / 3, b / 3, 255);
     SDL_RenderDrawRect(renderer, &body);
 
+    // Windshield
     SDL_SetRenderDrawColor(renderer, 135, 206, 235, 180);
     if (isVertical) {
         SDL_Rect window = { body.x + 2, body.y + 2, body.w - 4, body.h / 3 };
@@ -579,6 +613,7 @@ void drawLane(SDL_Renderer* renderer, Lane* L, int r, int g, int b) {
     }
 }
 
+// Draw vehicles in transition zone (yellow/orange)
 void drawTransitions(SDL_Renderer* renderer) {
     for (int i = 0; i < transitionCount; i++) {
         Vehicle* v = &transitions[i].v;
@@ -591,6 +626,7 @@ void drawTransitions(SDL_Renderer* renderer) {
     }
 }
 
+// Draw traffic lights with glow effect
 void drawTrafficLights(SDL_Renderer* renderer) {
     int cx = SCREEN_W / 2;
     int cy = SCREEN_H / 2;
@@ -604,14 +640,17 @@ void drawTrafficLights(SDL_Renderer* renderer) {
     };
 
     for (int i = 0; i < 4; i++) {
+        // Pole
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_Rect pole = { lightPositions[i][0] + 15, lightPositions[i][1] + 30, 3, 30 };
         SDL_RenderFillRect(renderer, &pole);
 
+        // Housing
         SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
         SDL_Rect housing = { lightPositions[i][0], lightPositions[i][1], 35, 30 };
         SDL_RenderFillRect(renderer, &housing);
 
+        // Light bulb
         if (i == currentGreen && lightState == GREEN_LIGHT) {
             SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
         }
@@ -629,7 +668,8 @@ void drawTrafficLights(SDL_Renderer* renderer) {
             }
         }
 
-        if (i == currentGreen && lightState == GREEN_LIGHT) {
+        // Glow for green lights
+                                                                                                                                                                                    if (i == currentGreen && lightState == GREEN_LIGHT) {
             SDL_SetRenderDrawColor(renderer, 0, 255, 0, 100);
             for (int dy = -10; dy <= 10; dy++) {
                 for (int dx = -10; dx <= 10; dx++) {
@@ -642,6 +682,7 @@ void drawTrafficLights(SDL_Renderer* renderer) {
     }
 }
 
+// Read vehicles from input files (incremental read)
 void readVehiclesFromFiles() {
     static int lastReadLines[4] = { 0, 0, 0, 0 };
 
@@ -652,6 +693,7 @@ void readVehiclesFromFiles() {
         char line[128];
         int currentLine = 0;
 
+        // Skip already read lines
         while (currentLine < lastReadLines[roadIdx] && fgets(line, sizeof(line), f)) {
             currentLine++;
         }
@@ -718,6 +760,7 @@ int main(int argc, char* argv[]) {
     TTF_Font* font = TTF_OpenFont("C:\\Windows\\Fonts\\arial.ttf", 16);
     srand((unsigned)time(NULL));
 
+    // Initialize all lanes
     for (int i = 0; i < 4; i++) {
         initLane(&roads[i].L1);
         initLane(&roads[i].L2);
@@ -738,16 +781,19 @@ int main(int argc, char* argv[]) {
 
         Uint32 now = SDL_GetTicks();
 
+        // Check for new vehicles every 200ms
         if (now - lastFileCheck >= 200) {
             readVehiclesFromFiles();
             lastFileCheck = now;
         }
 
+        // Change traffic lights every 5 seconds
         if (now - lastLightChange >= 5000) {
             currentGreen = (currentGreen + 1) % 4;
             lastLightChange = now;
         }
 
+        // Update all vehicles
         for (int r = 0; r < 4; r++) {
             moveLaneTowardCenter(&roads[r].L1, r);
             moveLaneTowardCenter(&roads[r].L2, r);
@@ -757,6 +803,7 @@ int main(int argc, char* argv[]) {
         cleanupStuckTransitions();
         moveTransitions();
 
+        // Transfer vehicles that reached intersection
         if (currentGreen >= 0 && currentGreen < 4 && lightState == GREEN_LIGHT) {
             {
                 Lane* L = &roads[currentGreen].L1;
@@ -777,7 +824,7 @@ int main(int argc, char* argv[]) {
                     if (reached) {
                         Vehicle temp;
                         dequeue(L, &temp);
-                        int targetRoad = (currentGreen + 1) % 4;
+                        int targetRoad = (currentGreen + 1) % 4;  // Turn left
                         addTransition(temp, targetRoad);
                         i--; cnt--;
                     }
@@ -806,6 +853,7 @@ int main(int argc, char* argv[]) {
                         int targetRoad;
                         int opposite = getOppositeRoad(currentGreen);
 
+                        // 50% straight, 50% turn
                         if (rand() % 2 == 0) {
                             targetRoad = opposite;
                         }
@@ -820,21 +868,23 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Render scene
         drawGradientBackground(renderer);
         drawLeaves(renderer);
         drawRoads(renderer);
 
+        // Draw vehicles by lane (different colors)
         for (int r = 0; r < 4; r++) {
-            drawLane(renderer, &roads[r].L1, 220, 80, 80);
-            drawLane(renderer, &roads[r].L2, 80, 220, 80);
-            drawLane(renderer, &roads[r].L3, 80, 120, 220);
+            drawLane(renderer, &roads[r].L1, 220, 80, 80);   // Red - Left
+            drawLane(renderer, &roads[r].L2, 80, 220, 80);   // Green - Straight
+            drawLane(renderer, &roads[r].L3, 80, 120, 220);  // Blue - Right
         }
 
         drawTransitions(renderer);
         drawTrafficLights(renderer);
 
         SDL_RenderPresent(renderer);
-        sleep_ms(16);
+        sleep_ms(16);  // ~60 FPS
     }
 
     if (font) TTF_CloseFont(font);
