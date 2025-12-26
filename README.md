@@ -4,7 +4,7 @@
 
 ## Assignment Information
 
-**Assignment Number:** Assignment 3 - Queue Data Structure Implementation  
+**Assignment Number:** Assignment 1 - Queue Data Structure Implementation  
 **Course:** Data Structures and Algorithms  
 **Student Name:** [Prabin K.C.]  
 **Roll Number:** [37]  
