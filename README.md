@@ -70,7 +70,7 @@ This project implements a **real-time four-way traffic intersection simulator** 
 🎥 Demo Video
 
 
-https://github.com/user-attachments/assets/0e48b672-39ff-4265-9b5e-61d2ac914ba4
+https://github.com/user-attachments/assets/17cc970d-347a-4d0c-bf89-4ed3e22b5984
 
 
 
