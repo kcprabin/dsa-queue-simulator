@@ -647,47 +647,7 @@ Simplified: O(4·l·n) = O(l·n)
 - Usually 0-2 new vehicles per check
 - **Practical complexity: O(1)** per frame (constant new vehicles)
 
-### 4. **Overall System Complexity Per Frame**
 
-**Main Loop - One Frame (16ms at 60 FPS):**
 
-```
-Total per frame = 
-    File Reading: O(f·l·n)
-  + Traffic Light: O(1)
-  + Vehicle Movement: 12 lanes × O(n·m)
-  + Transitions: O(t²)
-  + Rendering: O(v)
-  + Cleanup: O(t)
-
-Where:
-- f = 4 files
-- l = new lines per file ≈ 0-2
-- n = vehicles per lane ≈ 5-10
-- m = vehicles to check ≈ 3-5
-- t = transitions ≈ 3-8
-- v = total visible vehicles ≈ 40-80
-
-Potential Improvements:
-
-Spatial Partitioning: Reduce collision checks from O(n²) to O(n log n)
-Better Sorting: Use quicksort instead of bubble sort for transitions
-Event-Driven Updates: Only update vehicles when state changes
-Lazy Evaluation: Skip calculations for off-screen vehicles
-
-8. Performance Metrics
-Measured Performance (typical scenario):
-
-Frame rate: 60 FPS (16.67ms per frame)
-Total vehicles: 40-60
-CPU usage: <10% (modern processor)
-Memory usage: 25 KB (data structures only)
-
-Bottleneck Analysis:
-
-Rendering: ~40% of frame time (SDL2 drawing operations)
-Collision Detection: ~30% of frame time (O(n²) checks)
-File I/O: ~5% of frame time (checked every 200ms)
-Queue Operations: <5% of frame time (O(1) operations)
 Other: ~20% (transitions, cleanup, etc.)
 
