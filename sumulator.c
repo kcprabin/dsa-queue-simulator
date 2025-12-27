@@ -8,6 +8,8 @@
 #include <math.h>
 #include <string.h>
 
+// define secttion
+
 #define SCREEN_W 900
 #define SCREEN_H 900
 #define ROAD_W 200
@@ -669,7 +671,7 @@ void drawTrafficLights(SDL_Renderer* renderer) {
         }
 
         // Glow for green lights
-                                                                                                                                                                                    if (i == currentGreen && lightState == GREEN_LIGHT) {
+             if (i == currentGreen && lightState == GREEN_LIGHT) {
             SDL_SetRenderDrawColor(renderer, 0, 255, 0, 100);
             for (int dy = -10; dy <= 10; dy++) {
                 for (int dx = -10; dx <= 10; dx++) {
