@@ -516,6 +516,240 @@ END FOR
 ```
 
 ---
+# HOW TO RUN CODE 
+
+
+## Prerequisites
+
+### Required Software
+- **C Compiler**: MinGW-w64 (recommended) or Visual Studio
+- **SDL2**: Main graphics library
+- **SDL2_ttf**: Font rendering library
+
+### Download Links
+- SDL2: https://www.libsdl.org/download-2.0.php
+- SDL2_ttf: https://www.libsdl.org/projects/SDL_ttf/
+- MinGW-w64: https://www.mingw-w64.org/
+
+## Installation
+
+### 1. Install SDL2 Libraries
+
+1. Download SDL2 development libraries (MinGW version)
+2. Extract to `C:\SDL2\`
+3. Download SDL2_ttf development libraries
+4. Extract to `C:\SDL2\` (merge with existing SDL2 folder)
+
+Your directory structure should look like:
+```
+C:\SDL2\
+  ├── include\
+  │   ├── SDL2\
+  │   │   ├── SDL.h
+  │   │   └── SDL_ttf.h
+  └── lib\
+      ├── SDL2.dll
+      ├── SDL2_ttf.dll
+      └── ...
+```
+
+### 2. Create Input Files
+
+Create the directory structure for vehicle data:
+```
+C:\TrafficShared\
+  ├── lanea.txt
+  ├── laneb.txt
+  ├── lanec.txt
+  └── laned.txt
+```
+
+### 3. Format Input Files
+
+Each file represents a road direction (North, South, East, West). Add vehicle entries in this format:
+```
+1 Car1 2
+2 Truck1 3
+3 Car2 1
+4 Bus1 2
+```
+
+**Format:** `VehicleID VehicleName LaneNumber`
+
+**Lane Numbers:**
+- `1` = Left turn (Red vehicles)
+- `2` = Straight (Green vehicles)
+- `3` = Right turn (Blue vehicles)
+
+
+## Compilation
+
+### Using Visual Studio
+
+1. Create a new **Console Application** project
+2. Add the `.c` file to your project
+3. Configure **Project Properties**:
+   - **C/C++ → General → Additional Include Directories**: `C:\SDL2\include`
+   - **Linker → General → Additional Library Directories**: `C:\SDL2\lib\x64`
+   - **Linker → Input → Additional Dependencies**: Add `SDL2.lib;SDL2main.lib;SDL2_ttf.lib;`
+   - **Linker → System → SubSystem**: Windows (/SUBSYSTEM:WINDOWS)
+4. Build the project (F7)
+
+### Copy Required DLLs
+
+Copy these DLLs to the same directory as your `.exe`:
+```
+SDL2.dll
+SDL2_ttf.dll
+```
+
+## Running the Simulator
+
+### Execute the Program
+```bash
+./traffic.exe
+```
+
+### What to Expect
+
+- A window opens showing a 4-way intersection
+- Traffic lights at each corner (red/green)
+- Vehicles spawn from input files and move toward the intersection
+- Vehicles obey traffic signals (except right-turn lane)
+- Press **X** or close window to exit
+
+## How It Works
+
+### Traffic Light System
+- **Green light duration**: 5 seconds per direction
+- **Cycle order**: North → South → East → West → repeat
+- Right-turn vehicles (Lane 3) ignore traffic lights
+
+### Vehicle Behavior
+- **Lane 1 (Left Turn)**: Waits for green light, turns left at intersection
+- **Lane 2 (Straight)**: Waits for green light, goes straight or turns
+- **Lane 3 (Right Turn)**: Free flow, no waiting for lights
+
+### File Reading
+- Program checks input files every **200ms**
+- Add new lines to files while program is running
+- Vehicles spawn automatically when space is available
+
+### Collision Detection
+- Minimum spacing: 20 pixels
+- Stopping distance: 30 pixels from intersection
+- Priority queue system for intersection crossing
+
+## Customization
+
+### Modify Constants
+
+Open the source code and edit these values:
+```c
+#define SCREEN_W 900          // Window width
+#define SCREEN_H 900          // Window height
+#define VEHICLE_SPEED 2.0f    // Movement speed
+#define STOPPING_DISTANCE 30.0f  // Stop line distance
+```
+
+### Change Input File Paths
+```c
+const char* files[4] = {
+    "C:\\TrafficShared\\lanea.txt",  // North
+    "C:\\TrafficShared\\laneb.txt",  // South
+    "C:\\TrafficShared\\lanec.txt",  // East
+    "C:\\TrafficShared\\laned.txt"   // West
+};
+```
+
+### Adjust Traffic Light Timing
+```c
+// In main loop, change this value (milliseconds):
+if (now - lastLightChange >= 5000) {  // 5000ms = 5 seconds
+    currentGreen = (currentGreen + 1) % 4;
+    lastLightChange = now;
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Error: "Cannot find SDL2.dll"**
+- Copy `SDL2.dll` and `SDL2_ttf.dll` to the same folder as your `.exe`
+
+**Error: "Cannot open font file"**
+- Verify `C:\Windows\Fonts\arial.ttf` exists
+- Or change font path in code: `TTF_OpenFont("path/to/font.ttf", 16);`
+
+**No vehicles appearing**
+- Check that `C:\TrafficShared\` directory exists
+- Verify input files have correct format
+- Ensure at least one file has vehicle entries
+
+**Vehicles stuck/not moving**
+- Check for proper spacing in initial spawn positions
+- Review collision detection parameters
+- Verify traffic light timing is working
+
+**Compilation errors**
+- Verify SDL2 paths are correct
+- Ensure all SDL2 libraries are installed
+- Check compiler version compatibility
+
+**Black screen on startup**
+- Font file may be missing
+- Check SDL2 initialization
+- Verify window creation succeeded
+
+## Project Structure
+```
+TrafficSimulator/
+  ├── traffic_simulator.c    # Main source code
+  ├── traffic.exe            # Compiled executable
+  ├── SDL2.dll              # Required library
+  ├── SDL2_ttf.dll          # Required library
+  └── README.md             # This file
+
+C:\TrafficShared\
+  ├── lanea.txt             # North road vehicles
+  ├── laneb.txt             # South road vehicles
+  ├── lanec.txt             # East road vehicles
+  └── laned.txt             # West road vehicles
+```
+
+## Controls
+
+- **Close Window / ESC**: Exit simulator
+- No interactive controls during runtime (automatic simulation)
+
+## Technical Details
+
+### Key Components
+
+- **Circular Queue**: Efficient lane management (max 50 vehicles per lane)
+- **Priority Queue**: Intersection crossing based on waiting time
+- **Collision System**: Distance-based detection with configurable thresholds
+- **File Polling**: Incremental reading every 200ms
+
+### Performance
+
+- **Frame Rate**: ~60 FPS
+- **Max Vehicles**: 600 total (50 per lane × 12 lanes)
+- **Update Rate**: 16ms per frame
+- **File Check Rate**: 200ms
+
+### Color Coding
+
+- **Red vehicles**: Left turn (Lane 1)
+- **Green vehicles**: Straight (Lane 2)
+- **Blue vehicles**: Right turn (Lane 3)
+- **Yellow/Orange**: Vehicles in transition zone
+- **Darker colors**: Stopped vehicles
+
+
+--
+
 
 ## Time Complexity Analysis
 
