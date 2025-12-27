@@ -67,6 +67,14 @@ This project implements a **real-time four-way traffic intersection simulator** 
 ✅ Maintained code quality with incremental Git commits  
 
 ---
+🎥 Demo Video
+
+
+https://github.com/user-attachments/assets/0e48b672-39ff-4265-9b5e-61d2ac914ba4
+
+
+
+---
 
 ## Data Structures Used
 
