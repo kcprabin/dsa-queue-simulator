@@ -153,17 +153,17 @@ typedef struct {
 
 | Function | Data Structure Used | Operation Type | Time Complexity | Line Number |
 |----------|-------------------|----------------|-----------------|-------------|
-| `initLane()` | Lane (Queue) | Initialization | O(1) | 62-66 |
+| `makelane()` | Lane (Queue) | Initialization | O(1) | 62-66 |
 | `enqueue()` | Lane (Queue) | Insert | O(1) | 68-74 |
 | `dequeue()` | Lane (Queue) | Delete | O(1) | 76-83 |
-| `getLaneVehicle()` | Lane (Queue) | Access | O(1) | 85-89 |
+| `getVehicle()` | Lane (Queue) | Access | O(1) | 85-89 |
 | `checkTooCloseInLane()` | Lane (Queue) | Search | O(n) | 141-152 |
-| `getDistanceToVehicleAhead()` | Lane (Queue) | Search | O(n) | 154-179 |
-| `moveLaneTowardCenter()` | Lane (Queue) | Update/Traverse | O(n) | 193-257 |
-| `moveLaneL3()` | Lane (Queue) | Update/Traverse | O(n) | 181-236 |
+| `getdistance()` | Lane (Queue) | Search | O(n) | 154-179 |
+| `movetocenter()` | Lane (Queue) | Update/Traverse | O(n) | 193-257 |
+| `movetooL3()` | Lane (Queue) | Update/Traverse | O(n) | 181-236 |
 | `addTransition()` | Array of TransitionVehicle | Insert | O(1) | 259-266 |
 | `moveTransitions()` | Array of TransitionVehicle | Update/Traverse | O(n²) | 268-345 |
-| `cleanupStuckTransitions()` | Array of TransitionVehicle | Delete | O(n) | 347-361 |
+| `cleanupkTransitions()` | Array of TransitionVehicle | Delete | O(n) | 347-361 |
 | `readVehiclesFromFiles()` | Lane (Queue) | Insert | O(n) | 603-660 |
 
 ### Detailed Function Descriptions
